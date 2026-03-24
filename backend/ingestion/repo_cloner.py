@@ -7,8 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from git import Repo
-
 from config import get_settings
 
 settings = get_settings()
@@ -49,6 +47,8 @@ class RepoCloner:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def clone(self, repo_url: str, ref: str | None = None) -> Path:
+        from git import Repo
+
         repo_name = repo_name_from_url(repo_url)
         timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
         target = self.base_dir / f"{repo_name}-{timestamp}"
