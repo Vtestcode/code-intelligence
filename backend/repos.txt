@@ -1,0 +1,2 @@
+https://github.com/fastapi/fastapi
+https://github.com/tiangolo/full-stack-fastapi-template

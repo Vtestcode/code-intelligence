@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field, HttpUrl
+
+
+class RepoIngestRequest(BaseModel):
+    repo_urls: List[HttpUrl]
+    ref: Optional[str] = None
+    namespace: Optional[str] = None
+
+
+class QuestionRequest(BaseModel):
+    question: str = Field(..., min_length=3)
+    namespace: Optional[str] = None
+    max_context_items: int = Field(default=10, ge=1, le=25)
+
+
+class NamespaceCleanupRequest(BaseModel):
+    namespace: str = Field(..., min_length=1)
+
+
+class NamespaceCleanupResponse(BaseModel):
+    namespace: str
+    deleted_nodes: int
+
+
+class RetrievedItem(BaseModel):
+    kind: str
+    repo: str
+    path: str
+    symbol: Optional[str] = None
+    score: float
+    content: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AnswerResponse(BaseModel):
+    answer: str
+    cypher_context: List[RetrievedItem]
+    vector_context: List[RetrievedItem]
+    graph: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphSummaryResponse(BaseModel):
+    namespace: str
+    node_count: int
+    relationship_count: int
+    repos: List[str]
+    sample_nodes: List[Dict[str, Any]]
