@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from fastmcp import FastMCP
 
 from retrieval.cypher_retriever import CypherRetriever
@@ -13,13 +11,13 @@ graph = CypherRetriever()
 
 
 @mcp.tool
-def graph_search(query: str, namespace: Optional[str] = None, limit: int = 8):
+def graph_search(query: str, namespace: str | None = None, limit: int = 8):
     """Search the code graph for structural matches such as symbols, files, and call edges."""
     return graph.search(query=query, namespace=namespace, limit=limit)
 
 
 @mcp.tool
-def vector_search(query: str, namespace: Optional[str] = None, limit: int = 8):
+def vector_search(query: str, namespace: str | None = None, limit: int = 8):
     """Search code symbol embeddings for semantically similar code blocks."""
     return vector.search(query=query, namespace=namespace, limit=limit)
 
