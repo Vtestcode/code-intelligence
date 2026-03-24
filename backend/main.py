@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from neo4j.exceptions import Neo4jError
 
 from config import get_settings
-from evaluation.ragas_eval import RagasEvaluator
 from ingestion.ast_parser import ASTParser
 from ingestion.graph_builder import GraphBuilder
 from ingestion.repo_cloner import RepoCloner, repo_name_from_url
@@ -47,7 +46,6 @@ builder = GraphBuilder()
 vector = VectorRetriever()
 graph = CypherRetriever()
 llm = get_llm()
-evaluator = RagasEvaluator()
 
 
 @app.get("/health")
@@ -122,7 +120,14 @@ def graph_summary(namespace: str = "default") -> GraphSummaryResponse:
 
 @app.post("/evaluate")
 def evaluate_answers(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return {"results": evaluator.run(rows)}
+    try:
+        from evaluation.ragas_eval import RagasEvaluator
+
+        evaluator = RagasEvaluator()
+        return {"results": evaluator.run(rows)}
+    except Exception as exc:
+        logger.exception("Evaluation failed")
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {exc}") from exc
 
 
 @app.post("/cleanup", response_model=NamespaceCleanupResponse)
