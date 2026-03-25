@@ -336,7 +336,7 @@ export default function HomePage() {
             animate={{ opacity: 1, y: 0 }}
             className="min-w-0 overflow-hidden rounded-[2.2rem] border border-white/8 bg-[linear-gradient(180deg,rgba(12,16,26,0.96),rgba(10,13,24,0.96))] p-7 shadow-[0_30px_80px_rgba(0,0,0,0.4)]"
           >
-            <div className="font-[var(--font-display)] text-[2.35rem] font-bold leading-none tracking-[-0.04em] text-white sm:text-[3rem]">Inter/Geist</div>
+            <div className="font-[var(--font-display)] text-[2.35rem] font-bold leading-none tracking-[-0.04em] text-white sm:text-[3rem]">Ask Your Codebase</div>
 
             <div className="mt-8">
               <textarea
@@ -393,6 +393,26 @@ export default function HomePage() {
             transition={{ delay: 0.05 }}
             className="min-w-0 space-y-5"
           >
+            <div className="min-w-0 overflow-hidden rounded-[2.2rem] border border-cyan-300/16 bg-[linear-gradient(180deg,rgba(18,34,46,0.94),rgba(15,24,36,0.92))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.34)]">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[0.8rem] font-semibold uppercase tracking-[0.28em] text-cyan-300/70">Start Here</p>
+                  <h2 className="mt-3 font-[var(--font-display)] text-[1.75rem] font-bold leading-none tracking-[-0.04em] text-white sm:text-[2.15rem]">
+                    Need Question Ideas?
+                  </h2>
+                  <p className="mt-3 text-sm text-white/62">
+                    Open the guide page for sample prompts, supported use cases, and examples of strong repository questions.
+                  </p>
+                </div>
+                <Link
+                  href="/guide"
+                  className="rounded-[1rem] border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/20"
+                >
+                  Open Guide
+                </Link>
+              </div>
+            </div>
+
             <div className="min-w-0 overflow-hidden rounded-[2.2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(49,56,70,0.88),rgba(31,37,49,0.88))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.34)]">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">

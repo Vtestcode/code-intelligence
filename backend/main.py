@@ -85,6 +85,7 @@ def ask_question(payload: QuestionRequest) -> AnswerResponse:
     try:
         graph_hits = graph.search(payload.question, namespace=payload.namespace, limit=payload.max_context_items)
         vector_hits = vector.search(payload.question, namespace=payload.namespace, limit=payload.max_context_items)
+        overview_hits = graph.overview(namespace=payload.namespace, limit=max(4, min(8, payload.max_context_items)))
     except Neo4jError as exc:
         raise HTTPException(status_code=500, detail=f"Neo4j retrieval failed: {exc}") from exc
     except Exception as exc:
@@ -92,7 +93,7 @@ def ask_question(payload: QuestionRequest) -> AnswerResponse:
         raise HTTPException(status_code=500, detail=f"Question retrieval failed: {exc}") from exc
 
     try:
-        prompt = _build_answer_prompt(payload.question, graph_hits, vector_hits)
+        prompt = _build_answer_prompt(payload.question, graph_hits, vector_hits, overview_hits)
         answer = llm.invoke(prompt).content
         graph_data = _graph_visual(payload.namespace)
     except Exception as exc:
@@ -140,8 +141,12 @@ def cleanup_namespace(payload: NamespaceCleanupRequest) -> NamespaceCleanupRespo
     return NamespaceCleanupResponse(namespace=payload.namespace, deleted_nodes=deleted_nodes)
 
 
-def _build_answer_prompt(question: str, graph_hits: List[Dict], vector_hits: List[Dict]) -> str:
+def _build_answer_prompt(
+    question: str, graph_hits: List[Dict], vector_hits: List[Dict], overview_hits: List[Dict]
+) -> str:
     def format_hits(name: str, hits: List[Dict]) -> str:
+        if not hits:
+            return f"[{name}] none"
         blocks = []
         for item in hits[:8]:
             blocks.append(
@@ -151,10 +156,23 @@ def _build_answer_prompt(question: str, graph_hits: List[Dict], vector_hits: Lis
             )
         return "\n\n".join(blocks)
 
+    repos = sorted({item["repo"] for item in [*graph_hits, *vector_hits, *overview_hits] if item.get("repo")})
+    evidence_count = len(graph_hits) + len(vector_hits)
+    overview_count = len(overview_hits)
+
     return f"""
-You are an expert code intelligence assistant. Answer only from the supplied repository evidence.
-If evidence is insufficient, say what is missing.
+You are an expert code intelligence assistant.
+Answer from the supplied repository evidence only.
+Do not ask the user to provide file paths, symbols, snippets, or repository evidence because it is already included below.
+If graph/vector evidence is sparse, use the repository overview evidence to give the best grounded answer you can.
+If evidence is incomplete, say so briefly, but still summarize the most likely architecture and behavior supported by the evidence.
+Never claim you lack access to the repository evidence in this prompt.
 Explain architecture clearly and cite repo/path/symbol references inline.
+Mention when a statement comes from overview evidence rather than a specific symbol.
+
+Indexed repositories in scope: {", ".join(repos) if repos else "none"}
+Direct evidence blocks: {evidence_count}
+Overview evidence blocks: {overview_count}
 
 Question:
 {question}
@@ -164,6 +182,9 @@ Structural graph evidence:
 
 Semantic vector evidence:
 {format_hits('VECTOR', vector_hits)}
+
+Repository overview evidence:
+{format_hits('OVERVIEW', overview_hits)}
 """
 
 
