@@ -177,6 +177,7 @@ git branch -M main
 & "C:\Program Files\heroku\bin\heroku.cmd" login
 & "C:\Program Files\heroku\bin\heroku.cmd" git:remote -a code-intelligence-480d882a9215
 & "C:\Program Files\heroku\bin\heroku.cmd" buildpacks:clear -a code-intelligence-480d882a9215
+& "C:\Program Files\heroku\bin\heroku.cmd" buildpacks:add heroku-community/apt -a code-intelligence-480d882a9215
 & "C:\Program Files\heroku\bin\heroku.cmd" buildpacks:add heroku/python -a code-intelligence-480d882a9215
 & "C:\Program Files\heroku\bin\heroku.cmd" config:set NEO4J_URI=... NEO4J_USERNAME=... NEO4J_PASSWORD=... NEO4J_DATABASE=... OPENAI_API_KEY=... CORS_ORIGINS=... REPO_INDEX_ROOT=/tmp/code-intel-repos -a code-intelligence-480d882a9215
 git push heroku main
@@ -188,7 +189,7 @@ Check logs:
 & "C:\Program Files\heroku\bin\heroku.cmd" logs --tail -a code-intelligence-480d882a9215
 ```
 
-The root `Procfile` starts the backend from `backend/`, so this Heroku app is meant to host the API.
+The repo root includes Heroku deployment files (`Procfile`, `Aptfile`, `requirements.txt`, `.python-version`) so the backend can be deployed from the root while still running code from `backend/`.
 
 ### Frontend hosting
 
