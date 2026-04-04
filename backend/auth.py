@@ -17,7 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from config import get_settings
 from models import AuthStatusResponse, AuthTokenResponse, AuthUser
-from user_store import persist_user
+from user_store import authenticate_password_user, persist_user, register_password_user
 
 
 GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
@@ -74,6 +74,32 @@ def issue_guest_token(name: str | None = None) -> AuthTokenResponse:
     return AuthTokenResponse(access_token=token, expires_in=expires_in, user=actor.to_model())
 
 
+def register_with_password(email: str, password: str, name: str | None = None) -> AuthTokenResponse:
+    user = register_password_user(email=email, password=password, name=name)
+    actor = AuthActor(
+        subject=user["subject"],
+        provider=user["provider"],
+        is_guest=user["is_guest"],
+        name=user["name"],
+        email=user["email"],
+        picture=user["picture"],
+    )
+    return _issue_app_token(actor)
+
+
+def login_with_password(email: str, password: str) -> AuthTokenResponse:
+    user = authenticate_password_user(email=email, password=password)
+    actor = AuthActor(
+        subject=user["subject"],
+        provider=user["provider"],
+        is_guest=user["is_guest"],
+        name=user["name"],
+        email=user["email"],
+        picture=user["picture"],
+    )
+    return _issue_app_token(actor)
+
+
 def exchange_google_token(id_token: str) -> AuthTokenResponse:
     settings = get_settings()
     payload = _verify_google_id_token(id_token)
@@ -85,19 +111,6 @@ def exchange_google_token(id_token: str) -> AuthTokenResponse:
         email=payload.get("email"),
         picture=payload.get("picture"),
     )
-    expires_in = settings.jwt_expiration_hours * 3600
-    token = _encode_jwt(
-        {
-            "sub": actor.subject,
-            "provider": actor.provider,
-            "guest": actor.is_guest,
-            "name": actor.name,
-            "email": actor.email,
-            "picture": actor.picture,
-            "iat": int(time.time()),
-            "exp": int(time.time()) + expires_in,
-        }
-    )
     persist_user(
         subject=actor.subject,
         provider=actor.provider,
@@ -106,7 +119,7 @@ def exchange_google_token(id_token: str) -> AuthTokenResponse:
         email=actor.email,
         picture=actor.picture,
     )
-    return AuthTokenResponse(access_token=token, expires_in=expires_in, user=actor.to_model())
+    return _issue_app_token(actor)
 
 
 def get_optional_auth_actor(
@@ -178,6 +191,24 @@ def _encode_jwt(payload: Dict[str, Any]) -> str:
     signing_input = f"{_b64url_json(header)}.{_b64url_json(payload)}"
     signature = hmac.new(settings.jwt_secret.encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256).digest()
     return f"{signing_input}.{_b64url(signature)}"
+
+
+def _issue_app_token(actor: AuthActor) -> AuthTokenResponse:
+    settings = get_settings()
+    expires_in = settings.jwt_expiration_hours * 3600
+    token = _encode_jwt(
+        {
+            "sub": actor.subject,
+            "provider": actor.provider,
+            "guest": actor.is_guest,
+            "name": actor.name,
+            "email": actor.email,
+            "picture": actor.picture,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + expires_in,
+        }
+    )
+    return AuthTokenResponse(access_token=token, expires_in=expires_in, user=actor.to_model())
 
 
 def _decode_jwt(token: str) -> Dict[str, Any]:

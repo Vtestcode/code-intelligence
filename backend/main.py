@@ -16,6 +16,8 @@ from auth import (
     exchange_google_token,
     get_optional_auth_actor,
     issue_guest_token,
+    login_with_password,
+    register_with_password,
     scope_namespace,
 )
 from aura import AuraResumeError, ensure_neo4j_ready
@@ -29,6 +31,8 @@ from models import (
     AuthTokenResponse,
     GoogleAuthRequest,
     GuestAuthRequest,
+    PasswordLoginRequest,
+    PasswordRegisterRequest,
     GraphSummaryResponse,
     NamespaceCleanupRequest,
     NamespaceCleanupResponse,
@@ -72,6 +76,16 @@ def create_guest_token(payload: GuestAuthRequest) -> AuthTokenResponse:
 @app.post("/auth/google", response_model=AuthTokenResponse)
 def login_with_google(payload: GoogleAuthRequest) -> AuthTokenResponse:
     return exchange_google_token(payload.id_token)
+
+
+@app.post("/auth/register", response_model=AuthTokenResponse)
+def register_password_account(payload: PasswordRegisterRequest) -> AuthTokenResponse:
+    return register_with_password(payload.email, payload.password, payload.name)
+
+
+@app.post("/auth/login", response_model=AuthTokenResponse)
+def login_password_account(payload: PasswordLoginRequest) -> AuthTokenResponse:
+    return login_with_password(payload.email, payload.password)
 
 
 @app.post("/ingest")

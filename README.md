@@ -45,6 +45,8 @@ Optional auth env vars:
 Auth endpoints:
 - `POST /auth/guest` issues a guest JWT so users can use the app without creating an account.
 - `POST /auth/google` exchanges a Google ID token for an app JWT.
+- `POST /auth/register` creates an email/password account and returns an app JWT.
+- `POST /auth/login` signs in with email/password and returns an app JWT.
 - `GET /auth/me` returns the current authenticated or guest user from the bearer token.
 
 Protected behavior:

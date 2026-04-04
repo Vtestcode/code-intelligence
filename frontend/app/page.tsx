@@ -2,9 +2,9 @@
 
 import Link from 'next/link'
 import { motion } from 'framer-motion'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import type { AnswerResponse, AuthStatusResponse, AuthTokenResponse, AuthUser, CleanupResponse, IngestResponse } from '@/lib/types'
+import type { AnswerResponse, AuthStatusResponse, AuthUser, CleanupResponse, IngestResponse } from '@/lib/types'
 
 type RepoSession = {
   id: string
@@ -15,7 +15,6 @@ type RepoSession = {
 }
 
 const sampleQuestion = 'How does the authentication flow move through controllers, services, and storage?'
-const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''
 
 function extractRepoName(repoUrl: string) {
   const cleaned = repoUrl.trim().replace(/\/$/, '')
@@ -56,9 +55,6 @@ export default function HomePage() {
   const [sidebarWidth, setSidebarWidth] = useState(310)
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
-  const [authLoading, setAuthLoading] = useState(false)
-  const [guestName, setGuestName] = useState('')
-  const googleButtonRef = useRef<HTMLDivElement | null>(null)
 
   const activeSession = sessions.find((session) => session.id === selectedSessionId) || null
   const isAuthenticated = Boolean(authUser)
@@ -80,13 +76,6 @@ export default function HomePage() {
 
   async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     return fetch(input, init)
-  }
-
-  async function applyAuthResponse(payload: AuthTokenResponse, successMessage: string) {
-    clearWorkspaceState()
-    setAuthUser(payload.user)
-    setStatus(successMessage)
-    setError(null)
   }
 
   useEffect(() => {
@@ -141,91 +130,6 @@ export default function HomePage() {
       window.removeEventListener('mouseup', handlePointerUp)
     }
   }, [isResizingSidebar])
-
-  useEffect(() => {
-    if (!hydrated || !googleClientId || !googleButtonRef.current || typeof window === 'undefined') return
-
-    let cancelled = false
-
-    function renderGoogleButton() {
-      if (cancelled || !googleButtonRef.current || !window.google?.accounts?.id) return false
-      window.google.accounts.id.initialize({
-        client_id: googleClientId,
-        callback: async (response: { credential?: string }) => {
-          if (!response.credential) {
-            setError('Google sign-in did not return a credential.')
-            return
-          }
-
-          setAuthLoading(true)
-          setError(null)
-          setStatus(null)
-          try {
-            const authResponse = await fetch('/api/auth/google', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id_token: response.credential }),
-            })
-            const payload = (await authResponse.json()) as AuthTokenResponse | { detail?: string }
-            if (!authResponse.ok || !('user' in payload)) {
-              throw new Error('detail' in payload ? payload.detail || 'Google sign-in failed.' : 'Google sign-in failed.')
-            }
-            await applyAuthResponse(payload, `Signed in as ${payload.user.name || payload.user.email || 'Google user'}.`)
-          } catch (err) {
-            setError(err instanceof Error ? err.message : 'Google sign-in failed.')
-          } finally {
-            setAuthLoading(false)
-          }
-        },
-      })
-      googleButtonRef.current.innerHTML = ''
-      window.google.accounts.id.renderButton(googleButtonRef.current, {
-        type: 'standard',
-        theme: 'outline',
-        size: 'large',
-        text: 'signin_with',
-        shape: 'rectangular',
-        width: 260,
-      })
-      return true
-    }
-
-    if (renderGoogleButton()) return
-
-    const intervalId = window.setInterval(() => {
-      if (renderGoogleButton()) {
-        window.clearInterval(intervalId)
-      }
-    }, 250)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-    }
-  }, [hydrated])
-
-  async function handleGuestSignIn() {
-    setAuthLoading(true)
-    setError(null)
-    setStatus(null)
-    try {
-      const response = await fetch('/api/auth/guest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: guestName.trim() || undefined }),
-      })
-      const payload = (await response.json()) as AuthTokenResponse | { detail?: string }
-      if (!response.ok || !('user' in payload)) {
-        throw new Error('detail' in payload ? payload.detail || 'Guest sign-in failed.' : 'Guest sign-in failed.')
-      }
-      await applyAuthResponse(payload, `Guest mode enabled for ${payload.user.name || 'Guest User'}.`)
-      setGuestName('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Guest sign-in failed.')
-    } finally {
-      setAuthLoading(false)
-    }
-  }
 
   async function handleSignOut() {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -379,47 +283,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
-            <div className="rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2">
-              {isAuthenticated ? (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <div className="text-[0.72rem] text-[var(--text-secondary)]">
-                    Signed in as <span className="text-white">{userLabel}</span>
-                  </div>
-                  <button
-                    type="button"
-                      onClick={() => {
-                        void handleSignOut()
-                      }}
-                    className="rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#202020]"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <input
-                      value={guestName}
-                      onChange={(event) => setGuestName(event.target.value)}
-                      placeholder="Optional guest name"
-                      className="rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleGuestSignIn}
-                      disabled={authLoading}
-                      className="rounded-[6px] border border-transparent bg-[var(--button-primary)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {authLoading ? 'Signing In...' : 'Continue as Guest'}
-                    </button>
-                  </div>
-                  {googleClientId ? <div ref={googleButtonRef} className="min-h-[40px]" /> : <p className="text-[0.7rem] text-[var(--text-secondary)]">Set `NEXT_PUBLIC_GOOGLE_CLIENT_ID` to show Google sign-in.</p>}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               type="button"
               className="grid h-9 w-9 place-items-center rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] text-white/75 transition hover:bg-[#202020]"
@@ -438,6 +302,15 @@ export default function HomePage() {
               </svg>
             </button>
 
+            {!isAuthenticated ? (
+              <Link
+                href="/auth"
+                className="rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)]"
+              >
+                Sign In
+              </Link>
+            ) : null}
+
             <div className="flex items-center gap-2 rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-2 py-1.5 sm:px-3">
               <div className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-[var(--button-primary)] text-[0.72rem] font-semibold text-white">
                 {authUser?.picture ? <img src={authUser.picture} alt={userLabel} className="h-full w-full object-cover" /> : userInitials}
@@ -447,7 +320,18 @@ export default function HomePage() {
                 <p className="text-[0.68rem] text-[var(--text-secondary)]">{userRoleLabel}</p>
               </div>
             </div>
-          </div>
+
+            {isAuthenticated ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSignOut()
+                }}
+                className="rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2 text-xs font-medium text-white transition hover:bg-[#202020]"
+              >
+                Sign Out
+              </button>
+            ) : null}
           </div>
         </motion.header>
 
@@ -502,7 +386,7 @@ export default function HomePage() {
 
             <div className="mt-8 space-y-3">
               <p className="text-xs text-[var(--text-secondary)]">
-                {isAuthenticated ? 'Requests from this browser will include your bearer token and use a user-scoped namespace.' : 'You can use the app anonymously, or sign in above to keep user-specific namespaces.'}
+                {isAuthenticated ? 'Requests from this browser will include your session cookie and use a user-scoped namespace.' : 'You can use the app anonymously, or sign in from the top bar to keep user-specific namespaces.'}
               </p>
               <p className="text-sm uppercase tracking-[0.16em] text-[var(--text-muted)]">GitHub Repo URL</p>
               <input

@@ -73,6 +73,17 @@ class GoogleAuthRequest(BaseModel):
     id_token: str = Field(..., min_length=20)
 
 
+class PasswordRegisterRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=320)
+    password: str = Field(..., min_length=8, max_length=128)
+    name: Optional[str] = Field(default=None, max_length=80)
+
+
+class PasswordLoginRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=320)
+    password: str = Field(..., min_length=8, max_length=128)
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

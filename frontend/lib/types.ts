@@ -65,3 +65,9 @@ export type AuthTokenResponse = {
   expires_in: number
   user: AuthUser
 }
+
+export type PasswordAuthRequest = {
+  email: string
+  password: string
+  name?: string
+}
