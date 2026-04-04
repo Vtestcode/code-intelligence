@@ -6,16 +6,29 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j.exceptions import Neo4jError
 
+from auth import (
+    AuthActor,
+    auth_status,
+    exchange_google_token,
+    get_optional_auth_actor,
+    issue_guest_token,
+    scope_namespace,
+)
+from aura import AuraResumeError, ensure_neo4j_ready
 from config import get_settings
 from ingestion.ast_parser import ASTParser
 from ingestion.graph_builder import GraphBuilder
 from ingestion.repo_cloner import RepoCloner, repo_name_from_url
 from models import (
     AnswerResponse,
+    AuthStatusResponse,
+    AuthTokenResponse,
+    GoogleAuthRequest,
+    GuestAuthRequest,
     GraphSummaryResponse,
     NamespaceCleanupRequest,
     NamespaceCleanupResponse,
@@ -40,24 +53,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-cloner = RepoCloner()
-parser = ASTParser()
-builder = GraphBuilder()
-vector = VectorRetriever()
-graph = CypherRetriever()
-llm = get_llm()
-
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {"status": "ok", "app": settings.app_name}
 
 
+@app.get("/auth/me", response_model=AuthStatusResponse)
+def get_auth_status(actor: AuthActor | None = Depends(get_optional_auth_actor)) -> AuthStatusResponse:
+    return auth_status(actor)
+
+
+@app.post("/auth/guest", response_model=AuthTokenResponse)
+def create_guest_token(payload: GuestAuthRequest) -> AuthTokenResponse:
+    return issue_guest_token(payload.name)
+
+
+@app.post("/auth/google", response_model=AuthTokenResponse)
+def login_with_google(payload: GoogleAuthRequest) -> AuthTokenResponse:
+    return exchange_google_token(payload.id_token)
+
+
 @app.post("/ingest")
-def ingest_repositories(payload: RepoIngestRequest) -> Dict[str, Any]:
-    namespace = payload.namespace or "default"
+def ingest_repositories(payload: RepoIngestRequest, actor: AuthActor | None = Depends(get_optional_auth_actor)) -> Dict[str, Any]:
+    namespace = scope_namespace(payload.namespace, actor)
     processed: List[Dict[str, Any]] = []
+    cloner = RepoCloner()
+    parser = ASTParser()
+    builder = GraphBuilder()
     try:
+        resume_result = ensure_neo4j_ready()
         for repo_url in payload.repo_urls:
             repo_url_str = str(repo_url)
             repo_path = cloner.clone(repo_url_str, ref=payload.ref)
@@ -71,9 +96,18 @@ def ingest_repositories(payload: RepoIngestRequest) -> Dict[str, Any]:
                     "namespace": namespace,
                     "files_indexed": len(parsed_files),
                     "local_path": str(repo_path),
+                    "user": actor.to_model().model_dump() if actor else None,
                     "graph": graph_data,
+                    "neo4j_resume": {
+                        "attempted": resume_result.attempted,
+                        "resumed": resume_result.resumed,
+                        "message": resume_result.message,
+                    },
                 }
             )
+    except AuraResumeError as exc:
+        logger.exception("Neo4j Aura resume failed")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Repository ingest failed")
         raise HTTPException(status_code=500, detail=f"Repository ingest failed: {exc}") from exc
@@ -81,11 +115,15 @@ def ingest_repositories(payload: RepoIngestRequest) -> Dict[str, Any]:
 
 
 @app.post("/ask", response_model=AnswerResponse)
-def ask_question(payload: QuestionRequest) -> AnswerResponse:
+def ask_question(payload: QuestionRequest, actor: AuthActor | None = Depends(get_optional_auth_actor)) -> AnswerResponse:
+    namespace = scope_namespace(payload.namespace, actor)
+    graph = CypherRetriever()
+    vector = VectorRetriever()
+    llm = get_llm()
     try:
-        graph_hits = graph.search(payload.question, namespace=payload.namespace, limit=payload.max_context_items)
-        vector_hits = vector.search(payload.question, namespace=payload.namespace, limit=payload.max_context_items)
-        overview_hits = graph.overview(namespace=payload.namespace, limit=max(4, min(8, payload.max_context_items)))
+        graph_hits = graph.search(payload.question, namespace=namespace, limit=payload.max_context_items)
+        vector_hits = vector.search(payload.question, namespace=namespace, limit=payload.max_context_items)
+        overview_hits = graph.overview(namespace=namespace, limit=max(4, min(8, payload.max_context_items)))
     except Neo4jError as exc:
         raise HTTPException(status_code=500, detail=f"Neo4j retrieval failed: {exc}") from exc
     except Exception as exc:
@@ -95,7 +133,7 @@ def ask_question(payload: QuestionRequest) -> AnswerResponse:
     try:
         prompt = _build_answer_prompt(payload.question, graph_hits, vector_hits, overview_hits)
         answer = llm.invoke(prompt).content
-        graph_data = _graph_visual(payload.namespace)
+        graph_data = _graph_visual(namespace)
     except Exception as exc:
         logger.exception("Answer generation failed")
         raise HTTPException(status_code=500, detail=f"Answer generation failed: {exc}") from exc
@@ -108,10 +146,11 @@ def ask_question(payload: QuestionRequest) -> AnswerResponse:
 
 
 @app.get("/graph/summary", response_model=GraphSummaryResponse)
-def graph_summary(namespace: str = "default") -> GraphSummaryResponse:
-    data = _graph_visual(namespace)
+def graph_summary(namespace: str = "default", actor: AuthActor | None = Depends(get_optional_auth_actor)) -> GraphSummaryResponse:
+    effective_namespace = scope_namespace(namespace, actor)
+    data = _graph_visual(effective_namespace)
     return GraphSummaryResponse(
-        namespace=namespace,
+        namespace=effective_namespace,
         node_count=data["stats"]["nodes"],
         relationship_count=data["stats"]["relationships"],
         repos=sorted({n["repo"] for n in data["nodes"] if n.get("repo")}),
@@ -132,13 +171,14 @@ def evaluate_answers(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 @app.post("/cleanup", response_model=NamespaceCleanupResponse)
-def cleanup_namespace(payload: NamespaceCleanupRequest) -> NamespaceCleanupResponse:
+def cleanup_namespace(payload: NamespaceCleanupRequest, actor: AuthActor | None = Depends(get_optional_auth_actor)) -> NamespaceCleanupResponse:
+    effective_namespace = scope_namespace(payload.namespace, actor)
     try:
-        deleted_nodes = _delete_namespace(payload.namespace)
+        deleted_nodes = _delete_namespace(effective_namespace)
     except Exception as exc:
         logger.exception("Cleanup failed")
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {exc}") from exc
-    return NamespaceCleanupResponse(namespace=payload.namespace, deleted_nodes=deleted_nodes)
+    return NamespaceCleanupResponse(namespace=effective_namespace, deleted_nodes=deleted_nodes)
 
 
 def _build_answer_prompt(

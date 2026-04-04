@@ -49,3 +49,32 @@ class GraphSummaryResponse(BaseModel):
     relationship_count: int
     repos: List[str]
     sample_nodes: List[Dict[str, Any]]
+
+
+class AuthUser(BaseModel):
+    subject: str
+    provider: str
+    is_guest: bool = False
+    name: Optional[str] = None
+    email: Optional[str] = None
+    picture: Optional[str] = None
+
+
+class AuthStatusResponse(BaseModel):
+    authenticated: bool
+    user: Optional[AuthUser] = None
+
+
+class GuestAuthRequest(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=80)
+
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str = Field(..., min_length=20)
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: AuthUser

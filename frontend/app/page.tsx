@@ -2,9 +2,9 @@
 
 import Link from 'next/link'
 import { motion } from 'framer-motion'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AnswerResponse, CleanupResponse, IngestResponse } from '@/lib/types'
+import type { AnswerResponse, AuthStatusResponse, AuthTokenResponse, AuthUser, CleanupResponse, IngestResponse } from '@/lib/types'
 
 type RepoSession = {
   id: string
@@ -15,8 +15,7 @@ type RepoSession = {
 }
 
 const sampleQuestion = 'How does the authentication flow move through controllers, services, and storage?'
-const STORAGE_KEY = 'code-intel-last-answer'
-const SESSION_STORAGE_KEY = 'code-intel-session-state'
+const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''
 
 function extractRepoName(repoUrl: string) {
   const cleaned = repoUrl.trim().replace(/\/$/, '')
@@ -32,6 +31,15 @@ function buildNamespace(repoUrl: string) {
   return `${base || 'repo'}-${Date.now()}`
 }
 
+function initialsForUser(user: AuthUser | null) {
+  const label = user?.name || user?.email || 'User'
+  const parts = label
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  return (parts[0]?.[0] || 'U') + (parts[1]?.[0] || '')
+}
+
 export default function HomePage() {
   const [repoUrl, setRepoUrl] = useState('')
   const [question, setQuestion] = useState(sampleQuestion)
@@ -45,87 +53,187 @@ export default function HomePage() {
   const [status, setStatus] = useState<string | null>(null)
   const [graphStats, setGraphStats] = useState({ nodes: 0, relationships: 0 })
   const [hydrated, setHydrated] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(310)
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [guestName, setGuestName] = useState('')
+  const googleButtonRef = useRef<HTMLDivElement | null>(null)
 
   const activeSession = sessions.find((session) => session.id === selectedSessionId) || null
+  const isAuthenticated = Boolean(authUser)
+  const userInitials = useMemo(() => initialsForUser(authUser), [authUser])
+  const userLabel = authUser?.name || authUser?.email || 'Workspace User'
+  const userRoleLabel = authUser ? (authUser.is_guest ? 'Guest Session' : `${authUser.provider[0].toUpperCase()}${authUser.provider.slice(1)} User`) : 'Anonymous Access'
 
   const contextCount = useMemo(() => {
     if (!data) return 0
     return data.cypher_context.length + data.vector_context.length
   }, [data])
 
+  function clearWorkspaceState() {
+    setSessions([])
+    setSelectedSessionId('')
+    setData(null)
+    setGraphStats({ nodes: 0, relationships: 0 })
+  }
+
+  async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+    return fetch(input, init)
+  }
+
+  async function applyAuthResponse(payload: AuthTokenResponse, successMessage: string) {
+    clearWorkspaceState()
+    setAuthUser(payload.user)
+    setStatus(successMessage)
+    setError(null)
+  }
+
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY)
-    const answerRaw = window.localStorage.getItem(STORAGE_KEY)
+    let cancelled = false
 
-    try {
-      if (raw) {
-        const parsed = JSON.parse(raw) as {
-          sessions?: RepoSession[]
-          selectedSessionId?: string
-          graphStats?: { nodes: number; relationships: number }
+    async function restoreAuthSession() {
+      try {
+        const response = await fetch('/api/auth/me', {
+          method: 'GET',
+        })
+        const payload = (await response.json()) as AuthStatusResponse | { detail?: string }
+        if (!response.ok) {
+          throw new Error('Unable to restore session')
         }
-        setSessions(parsed.sessions || [])
-        setSelectedSessionId(parsed.selectedSessionId || '')
-        setGraphStats(parsed.graphStats || { nodes: 0, relationships: 0 })
-      }
-
-      if (answerRaw) {
-        const parsedAnswer = JSON.parse(answerRaw) as {
-          data?: AnswerResponse
-          question?: string
-          session?: { id?: string; namespace?: string } | null
+        if (!cancelled) {
+          setAuthUser('authenticated' in payload && payload.authenticated ? payload.user || null : null)
+          setHydrated(true)
         }
-        if (parsedAnswer.data) {
-          setData(parsedAnswer.data)
-          setGraphStats(parsedAnswer.data.graph?.stats || { nodes: 0, relationships: 0 })
-        }
-        if (parsedAnswer.question) {
-          setQuestion(parsedAnswer.question)
-        }
-        if (parsedAnswer.session?.id) {
-          setSelectedSessionId(parsedAnswer.session.id)
+      } catch {
+        if (!cancelled) {
+          setAuthUser(null)
+          clearWorkspaceState()
+          setHydrated(true)
         }
       }
-    } catch {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY)
-      window.localStorage.removeItem(STORAGE_KEY)
-    } finally {
-      setHydrated(true)
+    }
+
+    restoreAuthSession()
+
+    return () => {
+      cancelled = true
     }
   }, [])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !hydrated) return
-    if (!data) {
-      window.localStorage.removeItem(STORAGE_KEY)
-      return
+    if (!isResizingSidebar) return
+
+    function handlePointerMove(event: MouseEvent) {
+      const nextWidth = Math.min(420, Math.max(240, event.clientX - 24))
+      setSidebarWidth(nextWidth)
     }
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        data,
-        session: activeSession,
-        question,
-      }),
-    )
-  }, [activeSession, data, hydrated, question])
+
+    function handlePointerUp() {
+      setIsResizingSidebar(false)
+    }
+
+    window.addEventListener('mousemove', handlePointerMove)
+    window.addEventListener('mouseup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove)
+      window.removeEventListener('mouseup', handlePointerUp)
+    }
+  }, [isResizingSidebar])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !hydrated) return
-    if (!sessions.length && !selectedSessionId && graphStats.nodes === 0 && graphStats.relationships === 0) {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY)
-      return
+    if (!hydrated || !googleClientId || !googleButtonRef.current || typeof window === 'undefined') return
+
+    let cancelled = false
+
+    function renderGoogleButton() {
+      if (cancelled || !googleButtonRef.current || !window.google?.accounts?.id) return false
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: async (response: { credential?: string }) => {
+          if (!response.credential) {
+            setError('Google sign-in did not return a credential.')
+            return
+          }
+
+          setAuthLoading(true)
+          setError(null)
+          setStatus(null)
+          try {
+            const authResponse = await fetch('/api/auth/google', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id_token: response.credential }),
+            })
+            const payload = (await authResponse.json()) as AuthTokenResponse | { detail?: string }
+            if (!authResponse.ok || !('user' in payload)) {
+              throw new Error('detail' in payload ? payload.detail || 'Google sign-in failed.' : 'Google sign-in failed.')
+            }
+            await applyAuthResponse(payload, `Signed in as ${payload.user.name || payload.user.email || 'Google user'}.`)
+          } catch (err) {
+            setError(err instanceof Error ? err.message : 'Google sign-in failed.')
+          } finally {
+            setAuthLoading(false)
+          }
+        },
+      })
+      googleButtonRef.current.innerHTML = ''
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'rectangular',
+        width: 260,
+      })
+      return true
     }
-    window.localStorage.setItem(
-      SESSION_STORAGE_KEY,
-      JSON.stringify({
-        sessions,
-        selectedSessionId,
-        graphStats,
-      }),
-    )
-  }, [graphStats, hydrated, selectedSessionId, sessions])
+
+    if (renderGoogleButton()) return
+
+    const intervalId = window.setInterval(() => {
+      if (renderGoogleButton()) {
+        window.clearInterval(intervalId)
+      }
+    }, 250)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [hydrated])
+
+  async function handleGuestSignIn() {
+    setAuthLoading(true)
+    setError(null)
+    setStatus(null)
+    try {
+      const response = await fetch('/api/auth/guest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: guestName.trim() || undefined }),
+      })
+      const payload = (await response.json()) as AuthTokenResponse | { detail?: string }
+      if (!response.ok || !('user' in payload)) {
+        throw new Error('detail' in payload ? payload.detail || 'Guest sign-in failed.' : 'Guest sign-in failed.')
+      }
+      await applyAuthResponse(payload, `Guest mode enabled for ${payload.user.name || 'Guest User'}.`)
+      setGuestName('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Guest sign-in failed.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleSignOut() {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    setAuthUser(null)
+    clearWorkspaceState()
+    setStatus('Signed out. You can keep using the workspace anonymously or sign in again.')
+    setError(null)
+  }
 
   async function handleIngest() {
     const trimmedRepoUrl = repoUrl.trim()
@@ -139,7 +247,7 @@ export default function HomePage() {
     setError(null)
     setStatus(null)
     try {
-      const response = await fetch('/api/ingest', {
+      const response = await authorizedFetch('/api/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,7 +279,8 @@ export default function HomePage() {
       setData(null)
       setGraphStats(indexedRepo.graph.stats)
       setRepoUrl('')
-      setStatus(`Indexed ${nextSession.name} with ${nextSession.filesIndexed} files. Ask your first question when you're ready.`)
+      const resumeStatus = indexedRepo.neo4j_resume?.message ? `${indexedRepo.neo4j_resume.message} ` : ''
+      setStatus(`${resumeStatus}Indexed ${nextSession.name} with ${nextSession.filesIndexed} files. Ask your first question when you're ready.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -189,7 +298,7 @@ export default function HomePage() {
     setError(null)
     setStatus(null)
     try {
-      const response = await fetch('/api/ask', {
+      const response = await authorizedFetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -219,7 +328,7 @@ export default function HomePage() {
     setError(null)
     setStatus(null)
     try {
-      const response = await fetch('/api/cleanup', {
+      const response = await authorizedFetch('/api/cleanup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ namespace: activeSession.namespace }),
@@ -237,12 +346,6 @@ export default function HomePage() {
       setSelectedSessionId((current) => (current === activeSession.id ? nextSelectedSessionId : current))
       setData(null)
       setGraphStats({ nodes: 0, relationships: 0 })
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem(STORAGE_KEY)
-        if (!nextSelectedSessionId) {
-          window.localStorage.removeItem(SESSION_STORAGE_KEY)
-        }
-      }
       setStatus(`Session ended for ${activeSession.name}. Deleted ${cleanup.deleted_nodes} indexed nodes.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -252,213 +355,388 @@ export default function HomePage() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-5 text-white lg:px-6">
-      <div className="mx-auto flex max-w-[1760px] flex-col gap-5 xl:flex-row">
-        <motion.aside
-          initial={{ opacity: 0, x: -18 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="w-full overflow-hidden rounded-[2rem] border border-white/8 bg-[linear-gradient(180deg,rgba(18,24,42,0.94),rgba(11,16,28,0.94))] p-7 shadow-[0_30px_80px_rgba(0,0,0,0.35)] xl:w-[310px]"
+    <main className="min-h-screen px-3 py-4 text-white sm:px-4 sm:py-5 lg:px-6">
+      <div className="mx-auto max-w-[1760px]">
+        <motion.header
+          initial={{ opacity: 0, y: -12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 flex flex-col gap-3 rounded-[8px] border border-[var(--border)] bg-[var(--panel)] px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between"
         >
-          <div className="flex items-center gap-4">
-            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-[1.35rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-              <svg viewBox="0 0 64 64" className="h-10 w-10 text-white/90" aria-hidden="true">
-                <path d="M10 16 26 8v34L10 50Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-                <path d="M26 8 42 16v34L26 42Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-                <path d="M42 16 54 22v34L42 50Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" opacity="0.7" />
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)]">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 text-white/90" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 7 4 9.5v5L8 17l4-2.5v-5L8 7Z" />
+                <path d="m8 7 4 2.5 4-2.5" />
+                <path d="M12 9.5v5" />
+                <path d="m16 7 4 2.5v5L16 17l-4-2.5" opacity="0.7" />
               </svg>
             </div>
-            <div className="min-w-0">
-              <p className="font-[var(--font-display)] text-[0.92rem] font-medium uppercase tracking-[0.34em] text-cyan-300/78">
+            <div>
+              <p className="text-[0.72rem] font-medium uppercase tracking-[0.14em] text-[var(--text-secondary)] sm:text-[0.8rem]">
                 Code Intelligence
               </p>
-              <h1 className="mt-1 font-[var(--font-display)] text-[2.25rem] font-bold uppercase leading-[0.88] tracking-[-0.03em] text-white">
-                GraphRAG
-              </h1>
+              <h1 className="text-base font-semibold text-white sm:text-lg">GraphRAG Workspace</h1>
             </div>
           </div>
 
-          <div className="mt-14">
-            <p className="text-[0.85rem] uppercase tracking-[0.28em] text-cyan-300/75">Select Repository</p>
-            <div className="relative mt-4">
-              <select
-                value={selectedSessionId}
-                onChange={(event) => setSelectedSessionId(event.target.value)}
-                className="w-full rounded-[1.25rem] border border-white/8 bg-[#131c33] px-5 py-3 pr-14 text-base font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] outline-none transition focus:border-cyan-300/50"
-              >
-                <option value="">Choose an indexed repo</option>
-                {sessions.map((session) => (
-                  <option key={session.id} value={session.id}>
-                    {session.name}
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-5 flex items-center text-white/60">v</div>
+          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
+            <div className="rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2">
+              {isAuthenticated ? (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="text-[0.72rem] text-[var(--text-secondary)]">
+                    Signed in as <span className="text-white">{userLabel}</span>
+                  </div>
+                  <button
+                    type="button"
+                      onClick={() => {
+                        void handleSignOut()
+                      }}
+                    className="rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#202020]"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      value={guestName}
+                      onChange={(event) => setGuestName(event.target.value)}
+                      placeholder="Optional guest name"
+                      className="rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleGuestSignIn}
+                      disabled={authLoading}
+                      className="rounded-[6px] border border-transparent bg-[var(--button-primary)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {authLoading ? 'Signing In...' : 'Continue as Guest'}
+                    </button>
+                  </div>
+                  {googleClientId ? <div ref={googleButtonRef} className="min-h-[40px]" /> : <p className="text-[0.7rem] text-[var(--text-secondary)]">Set `NEXT_PUBLIC_GOOGLE_CLIENT_ID` to show Google sign-in.</p>}
+                </div>
+              )}
             </div>
-          </div>
 
-          <div className="mt-8 space-y-3">
-            <p className="text-sm uppercase tracking-[0.24em] text-white/45">GitHub Repo URL</p>
-            <input
-              value={repoUrl}
-              onChange={(event) => setRepoUrl(event.target.value)}
-              placeholder="https://github.com/owner/repo"
-              className="mt-4 w-full rounded-[1.15rem] border border-white/10 bg-[#090d18] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-300/55"
-            />
+            <div className="flex items-center gap-2 sm:gap-3">
             <button
-              onClick={handleIngest}
-              disabled={ingesting}
-              className="mt-4 w-full rounded-[1.15rem] bg-[linear-gradient(90deg,#2ce2ff,#47c4ff)] px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              className="grid h-9 w-9 place-items-center rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] text-white/75 transition hover:bg-[#202020]"
+              aria-label="Settings"
             >
-              {ingesting ? 'Indexing Repository...' : 'Use This Repository'}
+              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v3" />
+                <path d="M12 18v3" />
+                <path d="M3 12h3" />
+                <path d="M18 12h3" />
+                <path d="m5.64 5.64 2.12 2.12" />
+                <path d="m16.24 16.24 2.12 2.12" />
+                <path d="m5.64 18.36 2.12-2.12" />
+                <path d="m16.24 7.76 2.12-2.12" />
+                <circle cx="12" cy="12" r="3.25" />
+              </svg>
+            </button>
+
+            <div className="flex items-center gap-2 rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-2 py-1.5 sm:px-3">
+              <div className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-[var(--button-primary)] text-[0.72rem] font-semibold text-white">
+                {authUser?.picture ? <img src={authUser.picture} alt={userLabel} className="h-full w-full object-cover" /> : userInitials}
+              </div>
+              <div className="hidden sm:block">
+                <p className="text-[0.78rem] font-medium text-white">{userLabel}</p>
+                <p className="text-[0.68rem] text-[var(--text-secondary)]">{userRoleLabel}</p>
+              </div>
+            </div>
+          </div>
+          </div>
+        </motion.header>
+
+        <div className="flex flex-col gap-4 xl:flex-row">
+          <motion.aside
+            initial={{ opacity: 0, x: -18 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="w-full overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-6 xl:w-[310px]"
+            style={{ width: `min(100%, ${sidebarWidth}px)` }}
+          >
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)] sm:h-12 sm:w-12">
+                <svg viewBox="0 0 24 24" className="h-5 w-5 text-white/90 sm:h-6 sm:w-6" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 7 4 9.5v5L8 17l4-2.5v-5L8 7Z" />
+                  <path d="m8 7 4 2.5 4-2.5" />
+                  <path d="M12 9.5v5" />
+                  <path d="m16 7 4 2.5v5L16 17l-4-2.5" opacity="0.7" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-secondary)] sm:text-[0.86rem]">
+                  Code Intelligence
+                </p>
+                <h2 className="mt-1 text-[1.5rem] font-semibold uppercase leading-[1] tracking-[-0.01em] text-white sm:text-[1.75rem]">
+                  GraphRAG
+                </h2>
+              </div>
+            </div>
+
+            <div className="mt-8 sm:mt-12">
+              <p className="text-[0.82rem] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Select Repository</p>
+              <div className="relative mt-4">
+                <select
+                  value={selectedSessionId}
+                  onChange={(event) => setSelectedSessionId(event.target.value)}
+                  className="w-full rounded-[4px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-3 pr-12 text-[0.95rem] font-medium text-white outline-none transition focus:border-white/30"
+                >
+                  <option value="">Choose an indexed repo</option>
+                  {sessions.map((session) => (
+                    <option key={session.id} value={session.id}>
+                      {session.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-white/60">
+                  <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m5 7.5 5 5 5-5" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 space-y-3">
+              <p className="text-xs text-[var(--text-secondary)]">
+                {isAuthenticated ? 'Requests from this browser will include your bearer token and use a user-scoped namespace.' : 'You can use the app anonymously, or sign in above to keep user-specific namespaces.'}
+              </p>
+              <p className="text-sm uppercase tracking-[0.16em] text-[var(--text-muted)]">GitHub Repo URL</p>
+              <input
+                value={repoUrl}
+                onChange={(event) => setRepoUrl(event.target.value)}
+                placeholder="https://github.com/owner/repo"
+                className="mt-4 w-full rounded-[4px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
+              />
+              <button
+                onClick={handleIngest}
+                disabled={ingesting}
+                className="mt-4 w-full rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {ingesting ? 'Indexing Repository...' : 'Use This Repository'}
+              </button>
+            </div>
+
+            <div className="mt-8 border-t border-[var(--border)] pt-6 text-sm text-[var(--text-secondary)]">
+              {activeSession ? (
+                <>
+                  <p className="font-semibold text-white">Active Session</p>
+                  <p className="mt-3">{activeSession.name}</p>
+                  <p className="mt-2 break-all text-[var(--text-muted)]">{activeSession.repoUrl}</p>
+                  <p className="mt-2 text-[var(--text-muted)]">Namespace: {activeSession.namespace}</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold text-white">Ready to Index</p>
+                  <p className="mt-3 text-[var(--text-secondary)]">Paste a public GitHub repository URL and the app will create a fresh session for that codebase.</p>
+                </>
+              )}
+            </div>
+          </motion.aside>
+
+          <div className="hidden xl:flex xl:items-stretch">
+            <button
+              type="button"
+              onMouseDown={() => setIsResizingSidebar(true)}
+              aria-label="Resize sidebar"
+              className={`group relative mx-1 w-3 cursor-col-resize rounded-full transition ${isResizingSidebar ? 'bg-white/8' : 'bg-transparent hover:bg-white/5'}`}
+            >
+              <span className="absolute inset-y-8 left-1/2 w-[1px] -translate-x-1/2 bg-[var(--border)]" />
+              <span className="absolute left-1/2 top-1/2 h-16 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/20 transition group-hover:bg-white/35" />
             </button>
           </div>
 
-          <div className="mt-8 border-t border-white/8 pt-6 text-sm text-white/72">
-            {activeSession ? (
-              <>
-                <p className="font-semibold text-white">Active Session</p>
-                <p className="mt-3">{activeSession.name}</p>
-                <p className="mt-2 break-all text-white/45">{activeSession.repoUrl}</p>
-                <p className="mt-2 text-white/45">Namespace: {activeSession.namespace}</p>
-              </>
-            ) : (
-              <>
-                <p className="font-semibold text-white">Ready to Index</p>
-                <p className="mt-3 text-white/55">Paste a public GitHub repository URL and the app will create a fresh session for that codebase.</p>
-              </>
-            )}
+          <div className="grid min-w-0 flex-1 gap-4 xl:grid-cols-[1.35fr_0.8fr]">
+            <motion.section
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="min-w-0 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-6"
+            >
+              <div className="text-[1.5rem] font-semibold leading-none tracking-[-0.02em] text-white sm:text-[1.85rem]">Ask Your Codebase</div>
+
+              <div className="mt-5 sm:mt-6">
+                <textarea
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  rows={4}
+                  placeholder="Ask an architecture question..."
+                  className="min-h-[140px] w-full resize-none rounded-[4px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-[1rem] leading-[1.45] text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30 sm:min-h-[170px] sm:py-4 sm:text-[1.15rem]"
+                />
+
+                <div className="mt-4 flex flex-col gap-3 sm:mt-5 sm:flex-row sm:flex-wrap">
+                  <button
+                    onClick={handleAsk}
+                    disabled={loading || !activeSession}
+                    className="w-full rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-3 text-base font-semibold text-white transition hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
+                  >
+                    {loading ? 'Thinking...' : 'Ask GraphRAG'}
+                  </button>
+
+                  <button
+                    onClick={handleEndSession}
+                    disabled={cleaningUp || !activeSession}
+                    className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-3 text-base font-medium text-white transition hover:bg-[#202020] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
+                  >
+                    {cleaningUp ? 'Ending Session...' : 'End Session'}
+                  </button>
+                </div>
+
+                <div className="mt-7">
+                  <p className="text-sm uppercase tracking-[0.16em] text-[var(--text-secondary)]">Answer</p>
+                  <div className="mt-3 min-h-[260px] rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)] p-4 sm:min-h-[360px] sm:p-6">
+                    {loading ? (
+                      <div className="flex min-h-[220px] items-center justify-center sm:min-h-[300px]">
+                        <div className="flex flex-col items-center gap-4 text-center">
+                          <div className="flex items-center gap-2">
+                            {[0, 1, 2].map((dot) => (
+                              <motion.span
+                                key={dot}
+                                className="h-2.5 w-2.5 rounded-full bg-[var(--button-primary)]"
+                                animate={{ opacity: [0.35, 1, 0.35], y: [0, -3, 0] }}
+                                transition={{ duration: 0.9, repeat: Infinity, delay: dot * 0.14, ease: 'easeInOut' }}
+                              />
+                            ))}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white sm:text-base">GraphRAG is analyzing your repository</p>
+                            <p className="mt-1 text-xs leading-[1.5] text-[var(--text-secondary)] sm:text-sm">
+                              Retrieving graph context, embedding matches, and generating a grounded answer.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap text-[0.95rem] leading-[1.55] text-white/86 sm:text-[1.05rem]">
+                        {data?.answer || 'Index a repository, ask a question, and your grounded answer will appear here.'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {error ? <p className="mt-5 text-sm text-rose-300">{error}</p> : null}
+                {status ? <p className="mt-5 text-sm text-emerald-300">{status}</p> : null}
+              </div>
+            </motion.section>
+
+            <motion.section
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+              className="min-w-0 space-y-4"
+            >
+              <div className="min-w-0 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-6">
+                <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-4 grid h-9 w-9 place-items-center rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)]">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 text-white/80" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 18h6" />
+                        <path d="M10 22h4" />
+                        <path d="M12 2a6 6 0 0 0-3 11.2c.6.35 1 1 1 1.7V16h4v-1.1c0-.7.4-1.35 1-1.7A6 6 0 0 0 12 2Z" />
+                      </svg>
+                    </div>
+                    <p className="text-[0.78rem] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Start Here</p>
+                    <h2 className="mt-3 text-[1.45rem] font-semibold leading-none tracking-[-0.02em] text-white sm:text-[1.75rem]">
+                      Need Question Ideas?
+                    </h2>
+                    <p className="mt-3 text-sm leading-[1.45] text-[var(--text-secondary)]">
+                      Open the guide page for sample prompts, supported use cases, and examples of strong repository questions.
+                    </p>
+                  </div>
+                  <Link
+                    href="/guide"
+                    className="w-full rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] sm:w-auto"
+                  >
+                    Open Guide
+                  </Link>
+                </div>
+              </div>
+
+              <div className="min-w-0 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-6">
+                <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-4 grid h-9 w-9 place-items-center rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)]">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 text-white/80" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="7" cy="12" r="2" />
+                        <circle cx="17" cy="7" r="2" />
+                        <circle cx="17" cy="17" r="2" />
+                        <path d="m8.7 11 6.1-3" />
+                        <path d="m8.7 13 6.1 3" />
+                      </svg>
+                    </div>
+                    <h2 className="text-[1.55rem] font-semibold leading-none tracking-[-0.02em] text-white sm:text-[1.8rem]">
+                      Knowledge Graph
+                    </h2>
+                    <p className="mt-3 text-sm leading-[1.45] text-[var(--text-secondary)]">
+                      {graphStats.nodes} nodes and {graphStats.relationships} edges ready to inspect.
+                    </p>
+                  </div>
+                  <Link
+                    href="/graph"
+                    className="w-full rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] sm:w-auto"
+                  >
+                    View
+                  </Link>
+                </div>
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <p className="text-base leading-[1.45] text-white/78">
+                    Open the full graph page to explore the live network visualization for the latest answer.
+                  </p>
+                </div>
+              </div>
+
+              <div className="min-w-0 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-6">
+                <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-4 grid h-9 w-9 place-items-center rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)]">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 text-white/80" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 4H5a2 2 0 0 0-2 2v4" />
+                        <path d="M15 4h4a2 2 0 0 1 2 2v4" />
+                        <path d="M9 20H5a2 2 0 0 1-2-2v-4" />
+                        <path d="M15 20h4a2 2 0 0 0 2-2v-4" />
+                        <path d="M8 12h8" />
+                        <path d="M12 8v8" />
+                      </svg>
+                    </div>
+                    <h2 className="text-[1.55rem] font-semibold leading-none tracking-[-0.02em] text-white sm:text-[1.8rem]">
+                      Retrieved Context
+                    </h2>
+                    <p className="mt-3 text-sm leading-[1.45] text-[var(--text-secondary)]">{contextCount} evidence blocks captured from graph and vector search.</p>
+                  </div>
+                  <Link
+                    href="/context"
+                    className="w-full rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] sm:w-auto"
+                  >
+                    View
+                  </Link>
+                </div>
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <p className="text-base leading-[1.45] text-white/78">
+                    Open the context page to review every retrieved snippet, score, file path, and symbol reference.
+                  </p>
+                </div>
+              </div>
+            </motion.section>
           </div>
-        </motion.aside>
+        </div>
+      </div>
 
-        <div className="grid min-w-0 flex-1 gap-5 xl:grid-cols-[1.35fr_0.8fr]">
-          <motion.section
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="min-w-0 overflow-hidden rounded-[2.2rem] border border-white/8 bg-[linear-gradient(180deg,rgba(12,16,26,0.96),rgba(10,13,24,0.96))] p-7 shadow-[0_30px_80px_rgba(0,0,0,0.4)]"
-          >
-            <div className="font-[var(--font-display)] text-[2.35rem] font-bold leading-none tracking-[-0.04em] text-white sm:text-[3rem]">Ask Your Codebase</div>
-
-            <div className="mt-8">
-              <textarea
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                rows={4}
-                placeholder="Ask an architecture question..."
-                className="min-h-[190px] w-full resize-none rounded-[1.7rem] border border-cyan-300/85 bg-[#0d1322] px-6 py-5 text-[2rem] leading-tight text-white shadow-[0_0_0_1px_rgba(44,226,255,0.18),0_0_28px_rgba(44,226,255,0.35),inset_0_0_24px_rgba(44,226,255,0.08)] outline-none placeholder:text-white/45"
-              />
-
-              <div className="mt-6 flex flex-wrap gap-3">
-                <button
-                  onClick={handleAsk}
-                  disabled={loading || !activeSession}
-                  className="rounded-[1rem] bg-[linear-gradient(90deg,#2ce2ff,#48ccff)] px-5 py-3 text-lg font-semibold text-slate-950 transition hover:scale-[1.01] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55"
-                >
-                  {loading ? 'Thinking...' : 'Ask GraphRAG'}
-                </button>
-
-                <button
-                  onClick={handleEndSession}
-                  disabled={cleaningUp || !activeSession}
-                  className="rounded-[1rem] border border-white/10 bg-[linear-gradient(180deg,rgba(82,88,104,0.82),rgba(59,65,81,0.82))] px-5 py-3 text-lg font-medium text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-55"
-                >
-                  {cleaningUp ? 'Ending Session...' : 'End Session'}
-                </button>
-              </div>
-
-              <div className="mt-8">
-                <p className="text-sm uppercase tracking-[0.22em] text-cyan-300/70">Answer</p>
-                <div className="mt-4 min-h-[360px] rounded-[1.4rem] bg-[#0b101c]/70 p-6">
-                  <p className="whitespace-pre-wrap text-xl leading-relaxed text-white/86">
-                    {data?.answer || 'Index a repository, ask a question, and your grounded answer will appear here.'}
-                  </p>
-                </div>
-              </div>
-
-              {error ? <p className="mt-5 text-sm text-rose-300">{error}</p> : null}
-              {status ? <p className="mt-5 text-sm text-emerald-300">{status}</p> : null}
-
-              <div className="mt-8 flex items-center gap-4 border-t border-white/8 pt-6 text-white/82">
-                <div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-xl">[]</div>
-                <div>
-                  <p className="text-xl font-semibold">Powered by Neo4j & OpenAI</p>
-                  <p className="text-sm text-white/48">Graph retrieval, code embeddings, and grounded architecture answers.</p>
-                </div>
-              </div>
-            </div>
-          </motion.section>
-
-          <motion.section
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 }}
-            className="min-w-0 space-y-5"
-          >
-            <div className="min-w-0 overflow-hidden rounded-[2.2rem] border border-cyan-300/16 bg-[linear-gradient(180deg,rgba(18,34,46,0.94),rgba(15,24,36,0.92))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.34)]">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[0.8rem] font-semibold uppercase tracking-[0.28em] text-cyan-300/70">Start Here</p>
-                  <h2 className="mt-3 font-[var(--font-display)] text-[1.75rem] font-bold leading-none tracking-[-0.04em] text-white sm:text-[2.15rem]">
-                    Need Question Ideas?
-                  </h2>
-                  <p className="mt-3 text-sm text-white/62">
-                    Open the guide page for sample prompts, supported use cases, and examples of strong repository questions.
-                  </p>
-                </div>
-                <Link
-                  href="/guide"
-                  className="rounded-[1rem] border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/20"
-                >
-                  Open Guide
-                </Link>
-              </div>
-            </div>
-
-            <div className="min-w-0 overflow-hidden rounded-[2.2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(49,56,70,0.88),rgba(31,37,49,0.88))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.34)]">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <h2 className="font-[var(--font-display)] text-[1.95rem] font-bold leading-none tracking-[-0.04em] text-white sm:text-[2.25rem] xl:text-[2.4rem]">
-                    Knowledge Graph
-                  </h2>
-                  <p className="mt-3 text-sm text-white/58">
-                    {graphStats.nodes} nodes and {graphStats.relationships} edges ready to inspect.
-                  </p>
-                </div>
-                <Link
-                  href="/graph"
-                  className="rounded-[1rem] border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/20"
-                >
-                  View
-                </Link>
-              </div>
-              <div className="mt-6 border-t border-white/8 pt-5">
-                <p className="text-lg text-white/78">
-                  Open the full graph page to explore the live network visualization for the latest answer.
-                </p>
-              </div>
-            </div>
-
-            <div className="min-w-0 overflow-hidden rounded-[2.2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(49,56,70,0.88),rgba(31,37,49,0.88))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.34)]">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <h2 className="font-[var(--font-display)] text-[1.95rem] font-bold leading-none tracking-[-0.04em] text-white sm:text-[2.25rem] xl:text-[2.4rem]">
-                    Retrieved Context
-                  </h2>
-                  <p className="mt-3 text-sm text-white/58">{contextCount} evidence blocks captured from graph and vector search.</p>
-                </div>
-                <Link
-                  href="/context"
-                  className="rounded-[1rem] border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/20"
-                >
-                  View
-                </Link>
-              </div>
-              <div className="mt-6 border-t border-white/8 pt-5">
-                <p className="text-lg text-white/78">
-                  Open the context page to review every retrieved snippet, score, file path, and symbol reference.
-                </p>
-              </div>
-            </div>
-          </motion.section>
+      <div className="pointer-events-none fixed bottom-3 left-3 z-10 hidden sm:block">
+        <div className="flex items-start gap-2 rounded-[6px] border border-[var(--border)] bg-[rgba(26,26,26,0.92)] px-2.5 py-2 text-white/80 backdrop-blur">
+          <div className="grid h-6 w-6 place-items-center rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)]">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white/75" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12h7" />
+              <path d="M14 6h7" />
+              <path d="M14 18h7" />
+              <circle cx="12" cy="12" r="2.5" />
+            </svg>
+          </div>
+          <div className="leading-[1.2]">
+            <p className="text-[11px] font-semibold text-white">Powered by Neo4j & OpenAI</p>
+            <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">Graph retrieval, code embeddings, and grounded architecture answers.</p>
+          </div>
         </div>
       </div>
     </main>

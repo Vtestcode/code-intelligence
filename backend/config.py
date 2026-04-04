@@ -23,12 +23,23 @@ class Settings(BaseSettings):
     neo4j_username: str = Field(..., alias="NEO4J_USERNAME")
     neo4j_password: str = Field(..., alias="NEO4J_PASSWORD")
     neo4j_database: str = Field(default="neo4j", alias="NEO4J_DATABASE")
+    neo4j_aura_instance_id: str | None = Field(default=None, alias="NEO4J_AURA_INSTANCE_ID")
+    neo4j_aura_client_id: str | None = Field(default=None, alias="NEO4J_AURA_CLIENT_ID")
+    neo4j_aura_client_secret: str | None = Field(default=None, alias="NEO4J_AURA_CLIENT_SECRET")
+    neo4j_aura_auto_resume: bool = Field(default=True, alias="NEO4J_AURA_AUTO_RESUME")
 
     openai_api_key: str = Field(..., alias="OPENAI_API_KEY")
     openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
     llm_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
+
+    jwt_secret: str = Field(default="change-me-in-production", alias="JWT_SECRET")
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    jwt_expiration_hours: int = Field(default=24, alias="JWT_EXPIRATION_HOURS")
+    guest_jwt_expiration_hours: int = Field(default=168, alias="GUEST_JWT_EXPIRATION_HOURS")
+    google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
 
     default_branch: str = "main"
     repo_index_root: str = Field(default=DEFAULT_REPO_INDEX_ROOT, alias="REPO_INDEX_ROOT")

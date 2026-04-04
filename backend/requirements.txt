@@ -19,3 +19,4 @@ pandas==2.2.3
 fastmcp==2.10.6
 python-multipart==0.0.20
 datasets==3.3.2
+psycopg2-binary==2.9.10

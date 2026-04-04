@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import List
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -8,37 +9,40 @@ from neo4j import GraphDatabase
 from config import get_settings
 
 
-_settings = get_settings()
-
-
 def get_driver():
+    settings = get_settings()
     return GraphDatabase.driver(
-        _settings.neo4j_uri,
-        auth=(_settings.neo4j_username, _settings.neo4j_password),
+        settings.neo4j_uri,
+        auth=(settings.neo4j_username, settings.neo4j_password),
     )
 
 
 def _openai_client_kwargs() -> dict:
-    kwargs = {"api_key": _settings.openai_api_key}
-    if _settings.openai_base_url:
-        kwargs["base_url"] = _settings.openai_base_url
+    settings = get_settings()
+    kwargs = {"api_key": settings.openai_api_key}
+    if settings.openai_base_url:
+        kwargs["base_url"] = settings.openai_base_url
     return kwargs
 
 
+@lru_cache(maxsize=1)
 def get_llm() -> ChatOpenAI:
+    settings = get_settings()
     return ChatOpenAI(
-        model=_settings.llm_model,
+        model=settings.llm_model,
         **_openai_client_kwargs(),
         temperature=0.1,
         max_tokens=1200,
     )
 
 
+@lru_cache(maxsize=1)
 def get_embeddings() -> OpenAIEmbeddings:
+    settings = get_settings()
     return OpenAIEmbeddings(
-        model=_settings.embedding_model,
+        model=settings.embedding_model,
         **_openai_client_kwargs(),
-        dimensions=_settings.embedding_dimensions,
+        dimensions=settings.embedding_dimensions,
     )
 
 

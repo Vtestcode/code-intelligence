@@ -29,6 +29,12 @@ export type IngestedRepo = {
   namespace: string
   files_indexed: number
   local_path: string
+  user?: AuthUser | null
+  neo4j_resume?: {
+    attempted: boolean
+    resumed: boolean
+    message?: string | null
+  }
   graph: {
     nodes: Array<Record<string, unknown>>
     links: Array<Record<string, unknown>>
@@ -38,4 +44,24 @@ export type IngestedRepo = {
 
 export type IngestResponse = {
   indexed: IngestedRepo[]
+}
+
+export type AuthUser = {
+  subject: string
+  provider: string
+  is_guest: boolean
+  name?: string | null
+  email?: string | null
+  picture?: string | null
+}
+
+export type AuthStatusResponse = {
+  authenticated: boolean
+  user?: AuthUser | null
+}
+
+export type AuthTokenResponse = {
+  token_type: 'bearer'
+  expires_in: number
+  user: AuthUser
 }
