@@ -101,7 +101,8 @@ def ingest_repositories(payload: RepoIngestRequest, actor: AuthActor | None = De
             repo_url_str = str(repo_url)
             repo_path = cloner.clone(repo_url_str, ref=payload.ref)
             repo_name = repo_name_from_url(repo_url_str)
-            parsed_files = [parser.parse_file(path) for path in cloner.iter_source_files(repo_path)]
+            source_files = list(cloner.iter_source_files(repo_path))[: settings.max_repo_files]
+            parsed_files = [parser.parse_file(path) for path in source_files]
             builder.upsert_repository_graph(namespace=namespace, repo_name=repo_name, repo_path=repo_path, parsed_files=parsed_files)
             graph_data = _graph_visual(namespace)
             processed.append(

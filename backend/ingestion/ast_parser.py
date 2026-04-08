@@ -12,6 +12,65 @@ from config import get_settings
 
 settings = get_settings()
 
+TREE_SITTER_SUFFIXES = {
+    ".cjs",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".py",
+    ".ts",
+    ".tsx",
+}
+
+LANGUAGE_BY_SUFFIX = {
+    ".c": "c",
+    ".cc": "cpp",
+    ".cfg": "config",
+    ".conf": "config",
+    ".cpp": "cpp",
+    ".cs": "csharp",
+    ".css": "css",
+    ".csv": "csv",
+    ".cxx": "cpp",
+    ".dockerfile": "dockerfile",
+    ".go": "go",
+    ".graphql": "graphql",
+    ".h": "c",
+    ".hpp": "cpp",
+    ".html": "html",
+    ".java": "java",
+    ".jl": "julia",
+    ".js": "javascript",
+    ".json": "json",
+    ".jsx": "javascript",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".lua": "lua",
+    ".md": "markdown",
+    ".mdx": "markdown",
+    ".mjs": "javascript",
+    ".php": "php",
+    ".py": "python",
+    ".r": "r",
+    ".rb": "ruby",
+    ".rs": "rust",
+    ".scala": "scala",
+    ".scss": "scss",
+    ".sh": "shell",
+    ".sql": "sql",
+    ".swift": "swift",
+    ".svelte": "svelte",
+    ".toml": "toml",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".txt": "text",
+    ".vue": "vue",
+    ".xml": "xml",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".zsh": "shell",
+}
+
 
 @dataclass
 class SymbolRecord:
@@ -32,19 +91,27 @@ class ASTParser:
 
     def parse_file(self, path: Path) -> Dict:
         source = path.read_text(encoding="utf-8", errors="ignore")
-        parser = self.python_parser if path.suffix == ".py" else self.javascript_parser
-        tree = parser.parse(source.encode("utf-8"))
-        symbols = self._extract_symbols(tree.root_node, source, path.suffix)
+        suffix = path.suffix.lower()
+        symbols: List[SymbolRecord] = []
+        if suffix in TREE_SITTER_SUFFIXES:
+            parser = self.python_parser if suffix == ".py" else self.javascript_parser
+            tree = parser.parse(source.encode("utf-8"))
+            symbols = self._extract_symbols(tree.root_node, source, suffix)
+        if not symbols:
+            symbols = self._record_file_chunks(source)
         return {
             "path": str(path),
-            "language": self._language_for_suffix(path.suffix),
+            "language": self._language_for_suffix(path),
             "content": source,
             "symbols": [s.__dict__ for s in symbols],
             "imports": sorted({imp for s in symbols for imp in s.imports}),
         }
 
-    def _language_for_suffix(self, suffix: str) -> str:
-        return "python" if suffix == ".py" else "javascript"
+    def _language_for_suffix(self, path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix:
+            return LANGUAGE_BY_SUFFIX.get(suffix, suffix.lstrip("."))
+        return path.name.lower()
 
     def _extract_symbols(self, root: Node, source: str, suffix: str) -> List[SymbolRecord]:
         records: List[SymbolRecord] = []
@@ -102,6 +169,36 @@ class ASTParser:
             calls=[],
             imports=[],
         )
+
+    def _record_file_chunks(self, source: str) -> List[SymbolRecord]:
+        cleaned = source.strip()
+        if not cleaned:
+            return []
+
+        chunk_size = settings.max_chunk_chars * 2
+        overlap = min(settings.chunk_overlap_chars, max(0, chunk_size // 4))
+        records: List[SymbolRecord] = []
+        start = 0
+        chunk_index = 1
+        while start < len(cleaned) and chunk_index <= settings.max_file_chunks:
+            end = min(len(cleaned), start + chunk_size)
+            chunk = cleaned[start:end]
+            start_line = cleaned.count("\n", 0, start) + 1
+            end_line = cleaned.count("\n", 0, end) + 1
+            records.append(
+                SymbolRecord(
+                    symbol=f"file_chunk_{chunk_index}",
+                    symbol_type="file_chunk",
+                    start_line=start_line,
+                    end_line=end_line,
+                    content=chunk,
+                )
+            )
+            if end == len(cleaned):
+                break
+            start = max(end - overlap, start + 1)
+            chunk_index += 1
+        return records
 
     def _extract_simple_identifiers(self, node: Node, source: str, parent_types: set[str]) -> List[str]:
         values: List[str] = []

@@ -43,7 +43,9 @@ class Settings(BaseSettings):
 
     default_branch: str = "main"
     repo_index_root: str = Field(default=DEFAULT_REPO_INDEX_ROOT, alias="REPO_INDEX_ROOT")
+    max_repo_files: int = Field(default=750, alias="MAX_REPO_FILES")
     max_file_bytes: int = 250000
+    max_file_chunks: int = Field(default=8, alias="MAX_FILE_CHUNKS")
     max_chunk_chars: int = 1800
     chunk_overlap_chars: int = 200
     top_k_vector: int = 8
