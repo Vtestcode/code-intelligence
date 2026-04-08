@@ -12,11 +12,13 @@ export type AnswerResponse = {
   answer: string
   cypher_context: RetrievedItem[]
   vector_context: RetrievedItem[]
-  graph: {
-    nodes: Array<Record<string, unknown>>
-    links: Array<Record<string, unknown>>
-    stats: { nodes: number; relationships: number }
-  }
+  graph: GraphData
+}
+
+export type GraphData = {
+  nodes: Array<Record<string, unknown>>
+  links: Array<Record<string, unknown>>
+  stats: { nodes: number; relationships: number }
 }
 
 export type CleanupResponse = {
@@ -35,11 +37,7 @@ export type IngestedRepo = {
     resumed: boolean
     message?: string | null
   }
-  graph: {
-    nodes: Array<Record<string, unknown>>
-    links: Array<Record<string, unknown>>
-    stats: { nodes: number; relationships: number }
-  }
+  graph: GraphData
 }
 
 export type IngestResponse = {

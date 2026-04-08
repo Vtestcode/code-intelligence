@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { AnswerResponse, AuthStatusResponse, AuthUser, CleanupResponse, IngestResponse } from '@/lib/types'
+import type { AnswerResponse, AuthStatusResponse, AuthUser, CleanupResponse, GraphData, IngestResponse } from '@/lib/types'
 
 type RepoSession = {
   id: string
@@ -14,6 +14,14 @@ type RepoSession = {
   filesIndexed: number
 }
 
+type StoredWorkspace = {
+  sessions: RepoSession[]
+  selectedSessionId: string
+  data: AnswerResponse | null
+  graphStats: GraphData['stats']
+}
+
+const WORKSPACE_STORAGE_KEY = 'code-intel-workspace'
 const sampleQuestion = 'How does the authentication flow move through controllers, services, and storage?'
 
 function extractRepoName(repoUrl: string) {
@@ -72,11 +80,43 @@ export default function HomePage() {
     setSelectedSessionId('')
     setData(null)
     setGraphStats({ nodes: 0, relationships: 0 })
+    window.localStorage.removeItem(WORKSPACE_STORAGE_KEY)
   }
 
   async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     return fetch(input, init)
   }
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<StoredWorkspace>
+        if (Array.isArray(parsed.sessions)) {
+          setSessions(parsed.sessions)
+          setSelectedSessionId(parsed.selectedSessionId || parsed.sessions[0]?.id || '')
+          setData(parsed.data || null)
+          setGraphStats(parsed.graphStats || parsed.data?.graph?.stats || { nodes: 0, relationships: 0 })
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(WORKSPACE_STORAGE_KEY)
+    } finally {
+      setHydrated(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hydrated) return
+
+    const workspace: StoredWorkspace = {
+      sessions,
+      selectedSessionId,
+      data,
+      graphStats,
+    }
+    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(workspace))
+  }, [data, graphStats, hydrated, selectedSessionId, sessions])
 
   useEffect(() => {
     let cancelled = false
@@ -92,13 +132,10 @@ export default function HomePage() {
         }
         if (!cancelled) {
           setAuthUser('authenticated' in payload && payload.authenticated ? payload.user || null : null)
-          setHydrated(true)
         }
       } catch {
         if (!cancelled) {
           setAuthUser(null)
-          clearWorkspaceState()
-          setHydrated(true)
         }
       }
     }
@@ -558,7 +595,7 @@ export default function HomePage() {
                     </p>
                   </div>
                   <Link
-                    href="/graph"
+                    href={activeSession ? `/graph?namespace=${encodeURIComponent(activeSession.namespace)}` : '/graph'}
                     className="w-full rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] sm:w-auto"
                   >
                     View

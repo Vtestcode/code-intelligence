@@ -172,6 +172,12 @@ def graph_summary(namespace: str = "default", actor: AuthActor | None = Depends(
     )
 
 
+@app.get("/graph")
+def graph_visual(namespace: str = "default", actor: AuthActor | None = Depends(get_optional_auth_actor)) -> Dict[str, Any]:
+    effective_namespace = scope_namespace(namespace, actor)
+    return _graph_visual(effective_namespace)
+
+
 @app.post("/evaluate")
 def evaluate_answers(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     try:

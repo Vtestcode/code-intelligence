@@ -1,8 +1,107 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
+
+import GraphPanel from '@/components/GraphPanel'
+import type { GraphData } from '@/lib/types'
+
+type StoredWorkspace = {
+  sessions?: Array<{
+    id: string
+    name: string
+    namespace: string
+    repoUrl: string
+    filesIndexed: number
+  }>
+  selectedSessionId?: string
+  data?: { graph?: GraphData } | null
+  graphStats?: GraphData['stats']
+}
+
+const WORKSPACE_STORAGE_KEY = 'code-intel-workspace'
+const emptyGraph: GraphData = {
+  nodes: [],
+  links: [],
+  stats: { nodes: 0, relationships: 0 },
+}
 
 export default function GraphPage() {
+  const [graph, setGraph] = useState<GraphData>(emptyGraph)
+  const [namespace, setNamespace] = useState('')
+  const [repoLabel, setRepoLabel] = useState('Open a repository from the home screen')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const stats = useMemo(() => graph.stats || { nodes: graph.nodes.length, relationships: graph.links.length }, [graph])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadGraph() {
+      const params = new URLSearchParams(window.location.search)
+      let nextNamespace = params.get('namespace') || ''
+      let storedGraph: GraphData | null = null
+
+      try {
+        const stored = window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
+        if (stored) {
+          const workspace = JSON.parse(stored) as StoredWorkspace
+          const selectedSession =
+            workspace.sessions?.find((session) => session.namespace === nextNamespace) ||
+            workspace.sessions?.find((session) => session.id === workspace.selectedSessionId) ||
+            workspace.sessions?.[0]
+
+          nextNamespace = nextNamespace || selectedSession?.namespace || ''
+          storedGraph = workspace.data?.graph || null
+
+          if (!cancelled) {
+            setNamespace(nextNamespace)
+            setRepoLabel(selectedSession?.name || 'Open a repository from the home screen')
+            if (storedGraph) {
+              setGraph(storedGraph)
+            } else if (workspace.graphStats) {
+              setGraph({ ...emptyGraph, stats: workspace.graphStats })
+            }
+          }
+        } else if (!cancelled) {
+          setNamespace(nextNamespace)
+        }
+      } catch {
+        window.localStorage.removeItem(WORKSPACE_STORAGE_KEY)
+      }
+
+      if (!nextNamespace) {
+        if (!cancelled) setLoading(false)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/graph?namespace=${encodeURIComponent(nextNamespace)}`, { cache: 'no-store' })
+        const payload = (await response.json()) as GraphData | { detail?: string }
+        if (!response.ok) {
+          throw new Error('detail' in payload ? payload.detail || 'Graph load failed' : 'Graph load failed')
+        }
+        if (!cancelled) {
+          setGraph(payload as GraphData)
+          setError(null)
+        }
+      } catch (err) {
+        if (!cancelled && !storedGraph) {
+          setError(err instanceof Error ? err.message : 'Graph load failed')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadGraph()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <main className="min-h-screen px-3 py-4 text-white sm:px-4 sm:py-6 lg:px-6">
       <div className="mx-auto max-w-[1500px] rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-6">
@@ -22,7 +121,7 @@ export default function GraphPage() {
               Full Graph View
             </h1>
             <p className="mt-4 max-w-3xl leading-[1.45] text-[var(--text-secondary)]">
-              Run a query from the home screen to populate the graph.
+              {namespace ? 'Explore the indexed graph for the active repository session.' : 'Run a query from the home screen to populate the graph.'}
             </p>
           </div>
           <Link
@@ -35,13 +134,13 @@ export default function GraphPage() {
 
         <div className="mt-6 rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)] p-4 sm:p-6">
           <div className="mb-4 flex flex-col gap-2 text-sm text-[var(--text-secondary)] sm:flex-row sm:flex-wrap sm:gap-6">
-            <span>Repo: Open a repository from the home screen</span>
-            <span>Namespace: Active in your current session only</span>
-            <span>Nodes: 0 | Edges: 0</span>
+            <span>Repo: {repoLabel}</span>
+            <span>Namespace: {namespace || 'Active in your current session only'}</span>
+            <span>Nodes: {stats.nodes} | Edges: {stats.relationships}</span>
           </div>
-          <div className="flex h-[420px] items-center justify-center rounded-[8px] border border-[var(--border)] bg-[var(--bg-base)] text-center text-[var(--text-secondary)] sm:h-[520px] xl:h-[720px]">
-            Run a question from the home screen to view a live graph in the same session.
-          </div>
+          <GraphPanel graph={graph} heightClass="h-[420px] sm:h-[520px] xl:h-[720px]" />
+          {loading ? <p className="mt-4 text-sm text-[var(--text-secondary)]">Loading graph...</p> : null}
+          {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
         </div>
       </div>
     </main>
