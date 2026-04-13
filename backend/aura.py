@@ -101,12 +101,14 @@ def _host_from_uri(uri: str) -> str | None:
 
 def _resume_instance(instance_id: str, client_id: str, client_secret: str) -> None:
     token = _fetch_access_token(client_id, client_secret)
+    payload = json.dumps({}).encode("utf-8")
     request = Request(
         f"{API_BASE_URL}/instances/{instance_id}/resume",
-        data=b"",
+        data=payload,
         method="POST",
         headers={
             "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
             "Accept": "application/json",
         },
     )
