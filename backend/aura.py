@@ -56,7 +56,7 @@ def ensure_neo4j_ready() -> AuraResumeResult:
             ) from exc
 
         _resume_instance(instance_id, settings.neo4j_aura_client_id, settings.neo4j_aura_client_secret)
-        _wait_for_database_ready(timeout_seconds=90)
+        _wait_for_database_ready(timeout_seconds=20)
         return AuraResumeResult(
             attempted=True,
             resumed=True,
@@ -165,9 +165,13 @@ def _wait_for_database_ready(timeout_seconds: int) -> None:
             time.sleep(5)
     if last_error:
         raise AuraResumeError(
-            f"Neo4j Aura resume was requested, but the database was still not ready after {timeout_seconds} seconds: {last_error}"
+            "Neo4j Aura resume was requested, but the database is still waking up. "
+            f"Retry in about 1-2 minutes. Last error after {timeout_seconds} seconds: {last_error}"
         ) from last_error
-    raise AuraResumeError(f"Neo4j Aura resume was requested, but the database was still not ready after {timeout_seconds} seconds.")
+    raise AuraResumeError(
+        "Neo4j Aura resume was requested, but the database is still waking up. "
+        f"Retry in about 1-2 minutes. It was not ready after {timeout_seconds} seconds."
+    )
 
 
 def _wait_for_dns() -> None:
