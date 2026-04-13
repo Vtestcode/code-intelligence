@@ -155,7 +155,7 @@ function AuthPageContent() {
   }
 
   return (
-    <main className="min-h-screen px-3 py-4 text-white sm:px-4 sm:py-6 lg:px-6">
+    <main className="min-h-screen px-3 py-4 text-[var(--text-primary)] sm:px-4 sm:py-6 lg:px-6">
       <div className="mx-auto max-w-2xl">
         <div className="rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-5 sm:p-8">
           <div className="flex items-start justify-between gap-4">
@@ -163,7 +163,7 @@ function AuthPageContent() {
               <p className="text-[0.78rem] font-medium uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                 Account Access
               </p>
-              <h1 className="mt-3 text-[2rem] font-semibold leading-none tracking-[-0.02em] text-white sm:text-[2.4rem]">
+              <h1 className="mt-3 text-[2rem] font-semibold leading-none tracking-[-0.02em] text-[var(--text-primary)] sm:text-[2.4rem]">
                 Sign In
               </h1>
               <p className="mt-4 max-w-xl text-sm leading-[1.5] text-[var(--text-secondary)] sm:text-base">
@@ -172,7 +172,7 @@ function AuthPageContent() {
             </div>
             <Link
               href="/"
-              className="rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#202020]"
+              className="rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--hover-muted)]"
             >
               Back
             </Link>
@@ -182,7 +182,7 @@ function AuthPageContent() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm uppercase tracking-[0.14em] text-[var(--text-secondary)]">JWT</p>
-                <h2 className="mt-3 text-[1.5rem] font-semibold text-white">
+                <h2 className="mt-3 text-[1.5rem] font-semibold text-[var(--text-primary)]">
                   {authMode === 'signin' ? 'Sign in with email' : 'Create your account'}
                 </h2>
                 <p className="mt-2 text-sm leading-[1.5] text-[var(--text-secondary)]">
@@ -215,7 +215,7 @@ function AuthPageContent() {
                   value={fullName}
                   onChange={(event) => setFullName(event.target.value)}
                   placeholder="Full name"
-                  className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
+                  className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-secondary)]"
                 />
               ) : null}
               <input
@@ -223,14 +223,14 @@ function AuthPageContent() {
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="Email address"
                 type="email"
-                className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
+                className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-secondary)]"
               />
               <input
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Password"
                 type="password"
-                className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
+                className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-secondary)]"
               />
               <button
                 type="button"
@@ -246,7 +246,7 @@ function AuthPageContent() {
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <section className="rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)] p-5">
               <p className="text-sm uppercase tracking-[0.14em] text-[var(--text-secondary)]">Google</p>
-              <h2 className="mt-3 text-[1.3rem] font-semibold text-white">Use Google</h2>
+              <h2 className="mt-3 text-[1.3rem] font-semibold text-[var(--text-primary)]">Use Google</h2>
               <p className="mt-3 text-sm leading-[1.5] text-[var(--text-secondary)]">
                 Best if you want a persistent identity without managing a password here.
               </p>
@@ -263,7 +263,7 @@ function AuthPageContent() {
 
             <section className="rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)] p-5">
               <p className="text-sm uppercase tracking-[0.14em] text-[var(--text-secondary)]">Guest</p>
-              <h2 className="mt-3 text-[1.3rem] font-semibold text-white">Continue as guest</h2>
+              <h2 className="mt-3 text-[1.3rem] font-semibold text-[var(--text-primary)]">Continue as guest</h2>
               <p className="mt-3 text-sm leading-[1.5] text-[var(--text-secondary)]">
                 Use the workspace immediately without creating an account.
               </p>
@@ -272,13 +272,13 @@ function AuthPageContent() {
                   value={guestName}
                   onChange={(event) => setGuestName(event.target.value)}
                   placeholder="Optional guest name"
-                  className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
+                  className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-secondary)]"
                 />
                 <button
                   type="button"
                   onClick={handleGuestSignIn}
                   disabled={authLoading}
-                  className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#202020] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--hover-muted)] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {authLoading ? 'Signing In...' : 'Continue as Guest'}
                 </button>

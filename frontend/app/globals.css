@@ -13,6 +13,21 @@
   --text-muted: #8a8a93;
   --button-primary: #2563eb;
   --button-primary-hover: #1d4ed8;
+  --hover-muted: #202020;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-base: #f5f7fb;
+  --panel: #ffffff;
+  --panel-muted: #eef2f8;
+  --border: #d6deeb;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --button-primary: #1d4ed8;
+  --button-primary-hover: #1e40af;
+  --hover-muted: #e2e8f0;
 }
 
 * {
@@ -28,6 +43,21 @@ body {
   color: var(--text-primary);
   min-height: 100vh;
   background: var(--bg-base);
+}
+
+a,
+button,
+input,
+select,
+textarea,
+svg,
+path {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    fill 180ms ease,
+    stroke 180ms ease;
 }
 
 select {

@@ -22,6 +22,7 @@ type StoredWorkspace = {
 }
 
 const WORKSPACE_STORAGE_KEY = 'code-intel-workspace'
+const THEME_STORAGE_KEY = 'code-intel-theme'
 const sampleQuestion = 'How does the authentication flow move through controllers, services, and storage?'
 
 function extractRepoName(repoUrl: string) {
@@ -48,12 +49,14 @@ function initialsForUser(user: AuthUser | null) {
 }
 
 export default function HomePage() {
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark')
   const [repoUrl, setRepoUrl] = useState('')
   const [question, setQuestion] = useState(sampleQuestion)
   const [sessions, setSessions] = useState<RepoSession[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [loading, setLoading] = useState(false)
   const [ingesting, setIngesting] = useState(false)
+  const [ingestProgress, setIngestProgress] = useState(0)
   const [cleaningUp, setCleaningUp] = useState(false)
   const [data, setData] = useState<AnswerResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -89,6 +92,16 @@ export default function HomePage() {
 
   useEffect(() => {
     try {
+      const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+      const nextTheme =
+        storedTheme === 'light' || storedTheme === 'dark'
+          ? storedTheme
+          : window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light'
+      setTheme(nextTheme)
+      document.documentElement.dataset.theme = nextTheme
+
       const stored = window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<StoredWorkspace>
@@ -105,6 +118,31 @@ export default function HomePage() {
       setHydrated(true)
     }
   }, [])
+
+  useEffect(() => {
+    if (!hydrated) return
+    document.documentElement.dataset.theme = theme
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+  }, [hydrated, theme])
+
+  useEffect(() => {
+    if (!ingesting) {
+      setIngestProgress(0)
+      return
+    }
+
+    setIngestProgress(8)
+    const intervalId = window.setInterval(() => {
+      setIngestProgress((current) => {
+        if (current >= 92) return current
+        return Math.min(92, current + Math.max(4, (100 - current) * 0.08))
+      })
+    }, 450)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [ingesting])
 
   useEffect(() => {
     if (!hydrated) return
@@ -207,6 +245,8 @@ export default function HomePage() {
         throw new Error('The repository was submitted, but no indexed result was returned.')
       }
 
+      setIngestProgress(100)
+
       const nextSession: RepoSession = {
         id: namespace,
         name: indexedRepo.repo,
@@ -223,7 +263,13 @@ export default function HomePage() {
       const resumeStatus = indexedRepo.neo4j_resume?.message ? `${indexedRepo.neo4j_resume.message} ` : ''
       setStatus(`${resumeStatus}Indexed ${nextSession.name} with ${nextSession.filesIndexed} files. Ask your first question when you're ready.`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      if (message.toLowerCase().includes('neo4j aura resume was requested')) {
+        setStatus('Repository indexing is starting up. Give it a moment, then try again.')
+        setError(null)
+      } else {
+        setError(message)
+      }
     } finally {
       setIngesting(false)
     }
@@ -295,8 +341,12 @@ export default function HomePage() {
     }
   }
 
+  function toggleTheme() {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+  }
+
   return (
-    <main className="min-h-screen px-3 py-4 text-white sm:px-4 sm:py-5 lg:px-6">
+    <main className="min-h-screen px-3 py-4 text-[var(--text-primary)] sm:px-4 sm:py-5 lg:px-6">
       <div className="mx-auto max-w-[1760px]">
         <motion.header
           initial={{ opacity: 0, y: -12 }}
@@ -305,7 +355,7 @@ export default function HomePage() {
         >
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)]">
-              <svg viewBox="0 0 24 24" className="h-4 w-4 text-white/90" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 text-[var(--text-primary)]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M8 7 4 9.5v5L8 17l4-2.5v-5L8 7Z" />
                 <path d="m8 7 4 2.5 4-2.5" />
                 <path d="M12 9.5v5" />
@@ -316,15 +366,17 @@ export default function HomePage() {
               <p className="text-[0.72rem] font-medium uppercase tracking-[0.14em] text-[var(--text-secondary)] sm:text-[0.8rem]">
                 Code Intelligence
               </p>
-              <h1 className="text-base font-semibold text-white sm:text-lg">GraphRAG Workspace</h1>
+              <h1 className="text-base font-semibold text-[var(--text-primary)] sm:text-lg">GraphRAG Workspace</h1>
             </div>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
             <button
               type="button"
-              className="grid h-9 w-9 place-items-center rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] text-white/75 transition hover:bg-[#202020]"
-              aria-label="Settings"
+              onClick={toggleTheme}
+              className="grid h-9 w-9 place-items-center rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] text-[var(--text-primary)]/75 transition hover:bg-[var(--hover-muted)]"
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
             >
               <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3v3" />
@@ -353,7 +405,7 @@ export default function HomePage() {
                 {authUser?.picture ? <img src={authUser.picture} alt={userLabel} className="h-full w-full object-cover" /> : userInitials}
               </div>
               <div className="hidden sm:block">
-                <p className="text-[0.78rem] font-medium text-white">{userLabel}</p>
+                <p className="text-[0.78rem] font-medium text-[var(--text-primary)]">{userLabel}</p>
                 <p className="text-[0.68rem] text-[var(--text-secondary)]">{userRoleLabel}</p>
               </div>
             </div>
@@ -364,7 +416,7 @@ export default function HomePage() {
                 onClick={() => {
                   void handleSignOut()
                 }}
-                className="rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2 text-xs font-medium text-white transition hover:bg-[#202020]"
+                className="rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] transition hover:bg-[var(--hover-muted)]"
               >
                 Sign Out
               </button>
@@ -381,7 +433,7 @@ export default function HomePage() {
           >
             <div className="flex items-center gap-3 sm:gap-4">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[8px] border border-[var(--border)] bg-[var(--panel-muted)] sm:h-12 sm:w-12">
-                <svg viewBox="0 0 24 24" className="h-5 w-5 text-white/90 sm:h-6 sm:w-6" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <svg viewBox="0 0 24 24" className="h-5 w-5 text-[var(--text-primary)] sm:h-6 sm:w-6" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M8 7 4 9.5v5L8 17l4-2.5v-5L8 7Z" />
                   <path d="m8 7 4 2.5 4-2.5" />
                   <path d="M12 9.5v5" />
@@ -392,7 +444,7 @@ export default function HomePage() {
                 <p className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-secondary)] sm:text-[0.86rem]">
                   Code Intelligence
                 </p>
-                <h2 className="mt-1 text-[1.5rem] font-semibold uppercase leading-[1] tracking-[-0.01em] text-white sm:text-[1.75rem]">
+                <h2 className="mt-1 text-[1.5rem] font-semibold uppercase leading-[1] tracking-[-0.01em] text-[var(--text-primary)] sm:text-[1.75rem]">
                   GraphRAG
                 </h2>
               </div>
@@ -404,7 +456,7 @@ export default function HomePage() {
                 <select
                   value={selectedSessionId}
                   onChange={(event) => setSelectedSessionId(event.target.value)}
-                  className="w-full rounded-[4px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-3 pr-12 text-[0.95rem] font-medium text-white outline-none transition focus:border-white/30"
+                  className="w-full rounded-[4px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-3 pr-12 text-[0.95rem] font-medium text-[var(--text-primary)] outline-none transition focus:border-[var(--text-secondary)]"
                 >
                   <option value="">Choose an indexed repo</option>
                   {sessions.map((session) => (
@@ -413,7 +465,7 @@ export default function HomePage() {
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-white/60">
+                <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-[var(--text-secondary)]">
                   <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="m5 7.5 5 5 5-5" />
                   </svg>
@@ -430,28 +482,40 @@ export default function HomePage() {
                 value={repoUrl}
                 onChange={(event) => setRepoUrl(event.target.value)}
                 placeholder="https://github.com/owner/repo"
-                className="mt-4 w-full rounded-[4px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30"
+                className="mt-4 w-full rounded-[4px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-secondary)]"
               />
               <button
                 onClick={handleIngest}
                 disabled={ingesting}
-                className="mt-4 w-full rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                className="relative mt-4 w-full overflow-hidden rounded-[6px] border border-transparent bg-[var(--button-primary)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {ingesting ? 'Indexing Repository...' : 'Use This Repository'}
+                {ingesting ? (
+                  <>
+                    <motion.span
+                      className="absolute inset-y-0 left-0 bg-white/20"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${ingestProgress}%` }}
+                      transition={{ ease: 'easeOut', duration: 0.35 }}
+                    />
+                    <span className="relative z-[1]">Indexing Repository...</span>
+                  </>
+                ) : (
+                  'Use This Repository'
+                )}
               </button>
             </div>
 
             <div className="mt-8 border-t border-[var(--border)] pt-6 text-sm text-[var(--text-secondary)]">
               {activeSession ? (
                 <>
-                  <p className="font-semibold text-white">Active Session</p>
+                  <p className="font-semibold text-[var(--text-primary)]">Active Session</p>
                   <p className="mt-3">{activeSession.name}</p>
                   <p className="mt-2 break-all text-[var(--text-muted)]">{activeSession.repoUrl}</p>
                   <p className="mt-2 text-[var(--text-muted)]">Namespace: {activeSession.namespace}</p>
                 </>
               ) : (
                 <>
-                  <p className="font-semibold text-white">Ready to Index</p>
+                  <p className="font-semibold text-[var(--text-primary)]">Ready to Index</p>
                   <p className="mt-3 text-[var(--text-secondary)]">Paste a public GitHub repository URL and the app will create a fresh session for that codebase.</p>
                 </>
               )}
@@ -463,10 +527,10 @@ export default function HomePage() {
               type="button"
               onMouseDown={() => setIsResizingSidebar(true)}
               aria-label="Resize sidebar"
-              className={`group relative mx-1 w-3 cursor-col-resize rounded-full transition ${isResizingSidebar ? 'bg-white/8' : 'bg-transparent hover:bg-white/5'}`}
+              className={`group relative mx-1 w-3 cursor-col-resize rounded-full transition ${isResizingSidebar ? 'bg-[var(--panel-muted)]' : 'bg-transparent hover:bg-[var(--panel-muted)]'}`}
             >
               <span className="absolute inset-y-8 left-1/2 w-[1px] -translate-x-1/2 bg-[var(--border)]" />
-              <span className="absolute left-1/2 top-1/2 h-16 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/20 transition group-hover:bg-white/35" />
+              <span className="absolute left-1/2 top-1/2 h-16 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--text-secondary)]/30 transition group-hover:bg-[var(--text-secondary)]/60" />
             </button>
           </div>
 
@@ -476,7 +540,7 @@ export default function HomePage() {
               animate={{ opacity: 1, y: 0 }}
               className="min-w-0 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-6"
             >
-              <div className="text-[1.5rem] font-semibold leading-none tracking-[-0.02em] text-white sm:text-[1.85rem]">Ask Your Codebase</div>
+              <div className="text-[1.5rem] font-semibold leading-none tracking-[-0.02em] text-[var(--text-primary)] sm:text-[1.85rem]">Ask Your Codebase</div>
 
               <div className="mt-5 sm:mt-6">
                 <textarea
@@ -484,7 +548,7 @@ export default function HomePage() {
                   onChange={(event) => setQuestion(event.target.value)}
                   rows={4}
                   placeholder="Ask an architecture question..."
-                  className="min-h-[140px] w-full resize-none rounded-[4px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-[1rem] leading-[1.45] text-white outline-none placeholder:text-[var(--text-muted)] focus:border-white/30 sm:min-h-[170px] sm:py-4 sm:text-[1.15rem]"
+                  className="min-h-[140px] w-full resize-none rounded-[4px] border border-[var(--border)] bg-[var(--bg-base)] px-4 py-3 text-[1rem] leading-[1.45] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-secondary)] sm:min-h-[170px] sm:py-4 sm:text-[1.15rem]"
                 />
 
                 <div className="mt-4 flex flex-col gap-3 sm:mt-5 sm:flex-row sm:flex-wrap">
@@ -499,7 +563,7 @@ export default function HomePage() {
                   <button
                     onClick={handleEndSession}
                     disabled={cleaningUp || !activeSession}
-                    className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-3 text-base font-medium text-white transition hover:bg-[#202020] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
+                    className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-3 text-base font-medium text-[var(--text-primary)] transition hover:bg-[var(--hover-muted)] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
                   >
                     {cleaningUp ? 'Ending Session...' : 'End Session'}
                   </button>
